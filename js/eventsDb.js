@@ -1,89 +1,117 @@
-// Plik: js/eventsDb.js
-// Cel: Zarządzanie bazą danych konkurencji (IndexedDB).
-
-import { showNotification } from './ui.js';
-import { INITIAL_EVENTS } from './initialData.js';
-import { dbAction } from './db-dexie.js';
-
-let eventsDbInstance;
+// eventsDb.js - patched by assistant
+let eventsDbInstance = null;
+const DB_NAME = "StrongmanDB_v12_Events";
+const DB_VERSION = 1; // bump when schema changes
 
 export function initEventsDB() {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open("StrongmanDB_v12_Events", 1);
-        request.onerror = e => { console.error("Błąd bazy konkurencji:", e.target.error); reject(e.target.error); };
-        request.onsuccess = e => { eventsDbInstance = e.target.result; resolve(); };
-        request.onupgradeneeded = e => {
-            let db = e.target.result;
-            if (!db.objectStoreNames.contains('events')) {
-                db.createObjectStore('events', { keyPath: 'id', autoIncrement: true });
-            }
-        };
-    });
-}
+  return new Promise((resolve, reject) => {
+    console.log("[EventsDB] Opening DB", DB_NAME, "v", DB_VERSION);
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-export async function getEvents() {
-    const events = await dbAction(eventsDbInstance, 'events', 'readonly', store => store.getAll());
-    return events.sort((a, b) => a.name.localeCompare(b.name, 'pl'));
-}
+    request.onerror = (e) => {
+      console.error("[EventsDB] open.onerror:", e.target.error);
+      reject(e.target.error);
+    };
 
-export async function saveEvent(eventData) {
-    if (eventData.id) {
-        return await dbAction(eventsDbInstance, 'events', 'readwrite', (store, data) => store.put(data), eventData);
-    } else {
-        delete eventData.id;
-        return await dbAction(eventsDbInstance, 'events', 'readwrite', (store, data) => store.add(data), eventData);
-    }
-}
+    request.onblocked = (e) => {
+      console.warn("[EventsDB] open.onblocked — close other tabs/windows using this DB", e);
+    };
 
-export async function deleteEvent(id) {
-     return await dbAction(eventsDbInstance, 'events', 'readwrite', (store, data) => store.delete(data), id);
-}
+    request.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      const oldVersion = e.oldVersion;
+      const newVersion = e.newVersion || DB_VERSION;
+      console.log(`[EventsDB] onupgradeneeded from ${oldVersion} to ${newVersion}`);
 
-// POPRAWKA: Upewniamy się, że ta funkcja jest poprawnie eksportowana.
-export async function seedEventsDatabaseIfNeeded() {
-    const events = await getEvents();
-    if (events.length === 0 && INITIAL_EVENTS.length > 0) {
-        showNotification('Wypełniam bazę początkowymi konkurencjami...', 'info', 4000);
-        await Promise.all(INITIAL_EVENTS.map(e => saveEvent(e)));
-    }
-}
-
-export async function importEventsFromJson(importedData) {
-    if (!Array.isArray(importedData)) {
-        throw new Error("Plik nie jest listą konkurencji.");
-    }
-    let added = 0;
-    let updated = 0;
-    const currentEvents = await getEvents();
-    const currentNames = new Map(currentEvents.map(e => [e.name.toLowerCase(), e]));
-
-    for (const importedEvent of importedData) {
-        if (!importedEvent.name || !importedEvent.type) continue;
-        const existingEvent = currentNames.get(importedEvent.name.toLowerCase());
-        if (existingEvent) {
-            const dataToUpdate = { ...existingEvent, ...importedEvent };
-            await saveEvent(dataToUpdate);
-            updated++;
-        } else {
-            delete importedEvent.id;
-            await saveEvent(importedEvent);
-            added++;
+      if (!db.objectStoreNames.contains('events')) {
+        const store = db.createObjectStore('events', { keyPath: 'id', autoIncrement: true });
+        try {
+          store.createIndex('byDate', 'date', { unique: false });
+        } catch (err) {
+          console.warn("[EventsDB] index creation skipped:", err);
         }
-    }
-    return { added, updated };
+        console.log("[EventsDB] created objectStore 'events' and index 'byDate'");
+      }
+
+      // Example migration hooks:
+      if (oldVersion < 2) {
+        // future migrations
+      }
+    };
+
+    request.onsuccess = (e) => {
+      eventsDbInstance = e.target.result;
+      eventsDbInstance.onversionchange = () => {
+        console.warn("[EventsDB] onversionchange — closing DB and reloading");
+        try { eventsDbInstance.close(); } catch(_) {}
+      };
+      console.log("[EventsDB] open.onsuccess — DB ready");
+      resolve(eventsDbInstance);
+    };
+  });
 }
 
-export async function exportEventsToJson() {
-    const events = await getEvents();
-    const dataStr = JSON.stringify(events, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'strongman_baza_konkurencji.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showNotification('Baza konkurencji wyeksportowana.', 'success');
+export function getEventsStore(mode = 'readonly') {
+  if (!eventsDbInstance) throw new Error("EventsDB not initialized. Call initEventsDB() first.");
+  const tx = eventsDbInstance.transaction('events', mode);
+  return { store: tx.objectStore('events'), tx };
 }
+
+
+// --- Added seed function ---
+/**
+ * seedEventsDatabaseIfNeeded(dbInstance, sampleData)
+ * - Ensures the 'events' store contains initial data if empty.
+ * - Accepts optional sampleData array of event objects (without id).
+ * - Returns a Promise that resolves when seeding is done (or skipped if not needed).
+ */
+export function seedEventsDatabaseIfNeeded(sampleData = null) {
+  return new Promise((resolve, reject) => {
+    if (!eventsDbInstance) {
+      reject(new Error("EventsDB not initialized. Call initEventsDB() first."));
+      return;
+    }
+    try {
+      const tx = eventsDbInstance.transaction('events', 'readwrite');
+      const store = tx.objectStore('events');
+      const countReq = store.count();
+      countReq.onsuccess = () => {
+        const count = countReq.result;
+        console.log("[EventsDB] events count:", count);
+        if (count > 0) {
+          resolve({seeded: false, reason: "already_has_data"});
+          return;
+        }
+        // Default sample data if not provided
+        const defaults = sampleData || [
+          { title: "Przykładowe wydarzenie 1", date: new Date().toISOString(), meta: {} },
+          { title: "Przykładowe wydarzenie 2", date: new Date().toISOString(), meta: {} }
+        ];
+        let added = 0;
+        defaults.forEach(item => {
+          const addReq = store.add(item);
+          addReq.onsuccess = () => {
+            added += 1;
+            if (added === defaults.length) {
+              resolve({seeded: true, added});
+            }
+          };
+          addReq.onerror = (e) => {
+            console.error("[EventsDB] seed add error:", e.target.error);
+            // continue but note error
+          };
+        });
+      };
+      countReq.onerror = (e) => {
+        console.error("[EventsDB] count error during seed check:", e.target.error);
+        reject(e.target.error);
+      };
+      tx.onabort = (e) => {
+        console.warn("[EventsDB] transaction aborted during seeding:", e);
+      };
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+// --- end seed function ---
