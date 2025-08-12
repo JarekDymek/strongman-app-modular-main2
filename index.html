@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Strongman NextGen Modular</title>
+
+  <!-- Favicon -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext x='0' y='14'%3E⚙️%3C/text%3E%3C/svg%3E">
+
+  <!-- Zależności zewnętrzne -->
+  <link rel="stylesheet" href="css/main.css">
+
+  <!-- Link do manifestu PWA -->
+  <link rel="manifest" href="manifest.json">
+
+  <!-- Apple / iOS PWA meta -->
+  <link rel="apple-touch-icon" href="images/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+
+  <style>
+    /* Minimalne lokalne style używane przez modale/loader (jeśli nie są w CSS) */
+    .modal-overlay { display:none; position:fixed; inset:0; background: rgba(0,0,0,0.5); align-items:center; justify-content:center; z-index:1000; }
+    .modal-box { background:#fff; border-radius:8px; padding:16px; max-width:90vw; width:600px; box-shadow:0 6px 18px rgba(0,0,0,0.2); }
+    .modal-buttons { display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+    #saveIndicator { position: fixed; bottom: 12px; right: 12px; z-index: 9999; font-size: 20px; }
+    @keyframes spin { from { transform: rotate(0deg);} to { transform: rotate(360deg);} }
+    /* możesz usunąć powyższe jeśli masz własne style w css/main.css */
+  </style>
+</head>
+<body>
+
+  <!-- Global UI blocker / loader -->
+  <div id="appLoaderOverlay" style="display:none;position:fixed;inset:0;background:rgba(255,255,255,0.85);z-index:9999;align-items:center;justify-content:center;">
+    <div style="text-align:center;">
+      <div class="loader" aria-hidden="true" style="width:48px;height:48px;border-radius:50%;border:6px solid rgba(0,0,0,0.1);border-top-color:#007bff;animation:spin 1s linear infinite;margin:0 auto;"></div>
+      <div class="appLoaderMessage" style="margin-top:12px;font-size:16px;color:#222;">Proszę czekać — trwa operacja...</div>
+    </div>
+  </div>
+
+  <!-- Pasek powiadomień i wskaźnik zapisu -->
+  <div id="notification-bar"></div>
+  <div id="saveIndicator">💾</div>
+  <label id="autosaveToggleLabel" style="margin-left:10px;font-size:14px;display:inline-flex;align-items:center;">
+    <input type="checkbox" id="autosaveToggle" checked style="margin-right:6px;"> Autozapisy
+  </label>
+
+  <!-- --- SEKCJA MODALI --- -->
+  <div id="confirmationModal" class="modal-overlay">
+    <div class="modal-box">
+      <p id="modalText"></p>
+      <div class="modal-buttons">
+        <button id="confirmBtn">Tak</button>
+        <button id="cancelBtn">Anuluj</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- EDIT EXPORT MODAL -->
+  <div id="editExportModal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 90vw; width: 800px;">
+      <h3>Edytuj Raport Przed Eksportem</h3>
+      <div id="editable-content" contenteditable="true" style="border: 1px solid #ccc; padding: 15px; min-height: 40vh; text-align: left; background: #fff; color: #000;">
+        <!-- Treść raportu zostanie tutaj wstawiona -->
+      </div>
+      <div class="modal-buttons" style="margin-top: 20px;">
+        <button id="saveAndDownloadBtn">Zapisz i Pobierz</button>
+        <button id="cancelExportBtn" style="background: var(--error-color);">Anuluj</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="promptModal" class="modal-overlay">
+    <div class="modal-box">
+      <p id="promptText"></p>
+      <input type="text" id="promptInput" style="margin-top: 10px; margin-bottom: 20px;">
+      <div class="modal-buttons">
+        <button id="promptConfirmBtn">OK</button>
+        <button id="promptCancelBtn">Anuluj</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="competitorDetailModal" class="modal-overlay">
+    <div class="modal-box" onclick="event.stopPropagation()">
+      <h3 id="competitorDetailName" style="text-align: center;"></h3>
+      <img id="competitorDetailPhoto" src="" alt="Zdjęcie zawodnika" style="max-width:100%;height:auto;">
+      <div id="competitorDetailMeta"></div>
+      <h4>Osiągnięcia / Notatki:</h4>
+      <p id="competitorDetailNotes"></p>
+      <button id="competitorDetailCloseBtn" style="font-size: 16px; padding: 10px;">Zamknij</button>
+    </div>
+  </div>
+
+  <div id="competitorDbPanel" class="modal-overlay">
+    <div class="modal-box">
+      <h2>Baza Danych Zawodników</h2>
+      <form id="competitorForm">
+        <input type="hidden" id="competitorId">
+        <label for="competitorNameInput">Imię i nazwisko</label>
+        <input type="text" id="competitorNameInput" placeholder="Imię i nazwisko" required>
+        <div class="form-grid">
+          <div><label for="birthDateInput">Data urodzenia</label><input type="date" id="birthDateInput"></div>
+          <div><label for="residenceInput">M-ce zamieszkania</label><input type="text" id="residenceInput" placeholder="np. Malbork"></div>
+        </div>
+        <div class="form-grid">
+          <div><label for="heightInput">Wzrost (cm)</label><input type="number" id="heightInput" placeholder="np. 185"></div>
+          <div><label for="weightInput">Waga (kg)</label><input type="number" id="weightInput" placeholder="np. 140"></div>
+        </div>
+        <label>Kategorie</label>
+        <div id="competitorCategories" class="categories-checkbox-group"></div>
+        <label for="competitorNotesInput">Osiągnięcia / Notatki</label>
+        <textarea id="competitorNotesInput" placeholder="Główne osiągnięcia, rekordy..."></textarea>
+        <label for="competitorPhotoInput">Zdjęcie</label>
+        <input type="file" id="competitorPhotoInput" accept="image/*">
+        <button type="submit" id="competitorFormBtn">Dodaj Zawodnika</button>
+      </form>
+      <div id="competitorListContainer"></div>
+      <div id="dbManagementButtons">
+        <button id="exportDbBtn" style="background: var(--info-color); color: var(--dark-gray);">Eksportuj Bazę</button>
+        <button id="importDbTrigger" style="background: var(--info-color); color: var(--dark-gray);">Importuj Bazę</button>
+        <input type="file" id="importDbFile" accept=".json" style="display:none;">
+      </div>
+      <button id="closeDbPanelBtn" style="background: var(--primary-color); margin-top: 20px;">Zamknij Panel</button>
+    </div>
+  </div>
+
+  <div id="eventDbPanel" class="modal-overlay">
+    <div class="modal-box">
+      <h2>Baza Danych Konkurencji</h2>
+      <form id="eventForm">
+        <input type="hidden" id="eventId">
+        <label for="eventNameDbInput">Nazwa konkurencji</label>
+        <input type="text" id="eventNameDbInput" placeholder="np. Spacer Farmera" required>
+        <label for="eventTypeDbInput">Zasada punktacji</label>
+        <select id="eventTypeDbInput" required>
+          <option value="high">Więcej = Lepiej (np. powtórzenia)</option>
+          <option value="low">Mniej = Lepiej (np. czas)</option>
+        </select>
+        <button type="submit" id="eventFormBtn">Dodaj Konkurencję</button>
+      </form>
+      <div id="eventListContainer"></div>
+      <div id="eventDbManagementButtons">
+        <button id="exportEventsDbBtn" style="background: var(--info-color); color: var(--dark-gray);">Eksportuj Bazę</button>
+        <button id="importEventsDbTrigger" style="background: var(--info-color); color: var(--dark-gray);">Importuj Bazę</button>
+        <input type="file" id="importEventsDbFile" accept=".json" style="display:none;">
+      </div>
+      <button id="closeEventDbPanelBtn" style="background: var(--primary-color); margin-top: 20px;">Zamknij</button>
+    </div>
+  </div>
+
+  <div id="selectEventModal" class="modal-overlay">
+    <div class="modal-box">
+      <h3>Wybierz konkurencję z bazy</h3>
+      <div id="selectEventList"></div>
+      <button id="selectEventCancelBtn" style="background-color: var(--error-color);">Anuluj</button>
+    </div>
+  </div>
+
+  <div id="focusModeModal" class="modal-overlay">
+    <div class="modal-box focus-mode-box">
+      <button id="closeFocusBtn" class="focus-close-btn" aria-label="Zamknij tryb skupienia">×</button>
+      <div id="focusCompetitorInfo">
+        <img id="focusCompetitorPhoto" src="" alt="Zdjęcie zawodnika" style="max-width:100%;height:auto;">
+        <h3 id="focusCompetitorName"></h3>
+      </div>
+      <input type="text" inputmode="decimal" id="focusResultInput" placeholder="Wpisz wynik...">
+      <div class="focus-nav-buttons">
+        <button id="focusPrevBtn">Poprzedni</button>
+        <button id="focusConfirmNextBtn">Zatwierdź i Następny</button>
+        <button id="focusNextBtn">Następny</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="fsLapsModal" class="modal-overlay">
+    <div class="modal-box">
+      <h3>Wybierz wynik do zapisu</h3>
+      <div id="fsLapsModalList"></div>
+      <button id="fsLapsCancelBtn" style="background-color: var(--error-color);">Anuluj</button>
+    </div>
+  </div>
+
+  <div id="fullscreenStopwatch">
+    <a href="#" id="fsExitBtn">×</a>
+    <div id="fsDisplayArea">
+      <div id="fsTime">00:00.00</div>
+      <img id="fsCompetitorPhoto" src="" alt="Zdjęcie zawodnika">
+      <div id="fsCompetitorName">Zawodnik</div>
+    </div>
+    <div id="fsControls">
+      <div id="fsModeSelection">
+        <button id="fsRepsBtn" class="fs-btn">Powtórzenia</button>
+        <button id="fsLapsBtn" class="fs-btn">Międzyczasy</button>
+      </div>
+      <button id="fsStartStopBtn" class="fs-btn">Start</button>
+      <div id="fsPostStopControls">
+        <button id="fsResetBtn" class="fs-btn">Reset</button>
+        <button id="fsSaveBtn" class="fs-btn">Zapisz</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- GŁÓWNA ZAWARTOŚĆ STRONY -->
+  <div class="theme-selector">
+    <label for="themeSelector">Motyw:</label>
+    <select id="themeSelector">
+      <option value="light">Jasny</option>
+      <option value="dark">Ciemny</option>
+      <option value="contrast">Kontrastowy</option>
+    </select>
+  </div>
+
+  <div class="event-meta-header">
+    <div class="event-meta-inputs">
+      <input type="text" id="eventNameInput" placeholder="Nazwa zawodów" value="PUCHAR POLSKI &quot;TYBERIAN TEAM&quot;">
+      <input type="text" id="eventLocationInput" placeholder="Lokalizacja zawodów">
+    </div>
+    <div class="actions-grid" style="grid-template-columns: 1fr 1fr auto;">
+      <button id="manageDbBtn">Zarządzaj Zawodnikami</button>
+      <button id="manageEventsDbBtn">Zarządzaj Konkurencjami</button>
+    </div>
+  </div>
+
+  <header class="header">
+    <div class="logo-container">
+      <img id="logoImg" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzJjM2U1MCIgd2lkdGg9IjE1MHB4IiBoZWlnaHQ9IjE1MHB4Ij48cGF0aCBkPSJNMjIgMTJoLTJ2LTJoLTJ2LTJoLTJ2Mkg4di0ySDZ2MkgydjJoMlYxNGgydjJoMnYyaDJ2LTJoMnYtMmgydjJoMnYtMmgydjJoMnYtMmgydi0yaC0yem0tMTAgNmMtMS4xIDAtMi0uOS0yLTJzLjktMiAyLTIgMiAuOSAyIDJzLS45IDItMiAyetTTE2IDhjMCAxLjEtLjkgMi0yIDJoLTRjLTEuMSAwLTItLjktMi0yVjZoMHYyYzAgLjU1LjQ1IDEgMSAxczEtLjQ1IDEtMVY2aDJ2MmMwIC41NS40NSAxIDEgMXMxLS40NSAxLTFWNmgwdjJ6Ii8+PC9zdmc+" alt="Logo zawodów">
+      <div class="logo-actions">
+        <button id="installPWAButton" class="logo-btn" style="display:none;margin-left:8px;">Zainstaluj aplikację</button>
+        <button id="selectLogoBtn" class="logo-btn">Wybierz Logo</button>
+      </div>
+      <input type="file" id="logoUpload" accept="image/*" style="display:none">
+    </div>
+    <h1>🏋️‍♂️ ZAWODY STRONGMAN 🏋️‍♀️</h1>
+    <p>System Zarządzania NextGen - Wersja Modułowa</p>
+  </header>
+
+  <main id="intro" class="view">
+    <div class="intro-container">
+      <h2>Wybierz Zawodników</h2>
+      <p>Filtruj wg kategorii, aby zawęzić listę. Wybory są zachowywane pomiędzy filtrami.</p>
+      <div class="filter-buttons" id="categoryFilters">
+        <button class="filter-btn active" data-filter="all">Wszyscy</button>
+      </div>
+      <div id="competitorSelectionList">
+        <p>Ładowanie zawodników z bazy danych...</p>
+      </div>
+      <div id="selectionCounter">Wybrano: 0</div>
+      <div id="competitorSearchContainer">
+        <div id="competitorSearchResults"></div>
+      </div>
+
+      <div class="security-panel">
+        <h3>🛡️ Zabezpieczenia Przed Startem</h3>
+        <div class="button-group">
+          <button id="exportStateBtn_intro">Eksportuj Stan do Pliku</button>
+          <button id="importStateBtn_intro">Importuj Stan z Pliku</button>
+        </div>
+        <input type="file" id="importFile_intro" accept=".json" style="display:none;">
+      </div>
+      <button id="startCompetitionBtn">Rozpocznij Zawody</button>
+    </div>
+  </main>
+
+  <main id="mainContent" class="view" style="display:none;">
+    <div class="event-title-container">
+      <div id="eventTitle" contenteditable="true">Konkurencja 1</div>
+      <button id="selectEventFromDbBtn" title="Wybierz konkurencję z bazy">📂</button>
+    </div>
+    <div class="event-type-container">
+      <button id="highTypeBtn" class="type-btn active" data-type="high">⬆️ Więcej = Lepiej</button>
+      <button id="lowTypeBtn" class="type-btn" data-type="low">⬇️ Mniej = Lepiej</button>
+    </div>
+    <div class="actions-grid">
+      <button id="shuffleBtn">Pomieszaj</button>
+      <button id="showResultsBtn">Wyniki</button>
+      <button id="nextEventBtn">Następna Konkurencja</button>
+      <button id="finalEventBtn">Konkurencja Finałowa</button>
+      <button id="calculatePointsBtn">Przyznaj Punkty</button>
+      <button id="showFinalSummaryBtn">Podsumowanie</button>
+    </div>
+    <button id="toggleTableWidthBtn">Rozwiń Tabelę</button>
+    <div class="table-wrapper">
+      <table id="resultsTable">
+        <thead>
+          <tr><th>Zawodnik</th><th>Wynik</th><th>Miejsce</th><th>Pkt.</th><th>Suma</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="undo-redo-container">
+      <button id="undoBtn" disabled>Cofnij</button>
+      <button id="redoBtn" disabled>Ponów</button>
+    </div>
+    <div class="panel" id="historyPanel" style="display:none;">
+      <h3>Historia Konkurencji</h3>
+      <div id="eventList"></div>
+      <div class="panel" id="eventDetails"></div>
+    </div>
+    <div id="export-button-group" style="grid-template-columns: repeat(2, 1fr);">
+      <button id="exportHtmlBtn">Eksportuj jako HTML</button>
+      <button id="resetCompetitionBtn" style="background:var(--error-color)">Resetuj</button>
+    </div>
+    <div class="panel security-panel">
+      <h3>🛡️ Zabezpieczenia i Kopie Zapasowe</h3>
+      <div class="button-group">
+        <button id="saveCheckpointBtn">Zapisz Punkt Kontrolny</button>
+        <button id="showCheckpointsBtn">Wczytaj Punkt Kontrolny</button>
+        <button id="exportStateBtn_main">Eksportuj Stan do Pliku</button>
+        <button id="importStateBtn_main">Importuj Stan z Pliku</button>
+      </div>
+      <input type="file" id="importFile_main" accept=".json" style="display:none;">
+      <div id="checkpointListContainer" style="display:none; margin-top:15px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <h4>Dostępne punkty kontrolne:</h4>
+          <strong id="storageUsage"></strong>
+        </div>
+        <div id="checkpointList"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Ukryty kontener do generowania PDF/Obrazu -->
+  <div id="pdf-export-container" style="position: absolute; left: -9999px; width: 800px; background: white; padding: 20px; color: black;"></div>
+
+  <!-- Główny skrypt aplikacji -->
+  <script type="module" src="js/main.js"></script>
+  <!-- PWA helper (beforeinstallprompt, storage.persist, iOS modal show) -->
+  <script type="module" src="js/pwa.js"></script>
+  <script type="module" src="js/install.js"></script>
+
+  <!-- Skrypt rejestrujący Service Worker dla PWA -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').then(registration => {
+          console.log('ServiceWorker registration successful with scope: ', registration.scope);
+        }, err => {
+          console.log('ServiceWorker registration failed: ', err);
+        });
+      });
+    }
+  </script>
+
+  <!-- PEŁNOEKRANOWY PROMPTER DLA SPIKERA (HTML) -->
+  <div id="fullscreen-prompter" class="fixed inset-0 z-50 flex items-center justify-center p-4 opacity-0 pointer-events-none transition-opacity duration-300" aria-hidden="true">
+    <div class="absolute inset-0 bg-gray-900 bg-opacity-95"></div>
+    <div class="relative w-full max-w-5xl text-center">
+      <p id="prompter-text" class="text-white text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold leading-tight select-none"></p>
+    </div>
+  </div>
+
+  <!-- iOS Add to Home Screen modal (hidden by default) -->
+  <div id="ios-install-modal" style="display:none;position:fixed;left:0;right:0;bottom:20px;z-index:9999;padding:12px;margin:12px;background:#222;color:#fff;border-radius:8px;max-width:520px;margin-left:auto;margin-right:auto;text-align:center;">
+    <div style="font-size:16px;margin-bottom:8px;">Aby zainstalować aplikację: naciśnij <strong>Udostępnij</strong> → <strong>Dodaj na ekran początkowy</strong></div>
+    <button id="ios-install-close" style="margin-top:6px;padding:6px 12px;border-radius:6px;border:none;background:#fff;color:#222">OK</button>
+  </div>
+
+</body>
+</html>
